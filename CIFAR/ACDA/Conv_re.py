@@ -1,21 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.init as init
-
-from torch.autograd import Variable
-
-from torch.nn.parameter import Parameter
-import math
-import scipy as sp
-import scipy.linalg as linalg
-import numpy as np
-import pdb
-from torch.nn.utils import spectral_norm
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
 
 class ACDA(nn.Module):
@@ -44,7 +29,11 @@ class ACDA(nn.Module):
         filters = filters.view(batch_size, self.out_channels, self.spatial_atoms, self.kernel_size * self.kernel_size, height, width)
         
         # Create the position grid
-        y_grid, x_grid = torch.meshgrid(torch.linspace(-1, 1, height), torch.linspace(-1, 1, width))
+        y_grid, x_grid = torch.meshgrid(
+            torch.linspace(-1, 1, height, device=x.device),
+            torch.linspace(-1, 1, width, device=x.device),
+            indexing='ij',
+        )
         position_grid = torch.stack((x_grid, y_grid), dim=2).unsqueeze(0).to(x.device)
 
         # Calculate the spatial compositional coefficients

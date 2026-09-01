@@ -21,7 +21,12 @@ def main():
     parser.add_argument('--epoch', default=100, type=int, help='number of epochs tp train for')
     parser.add_argument('--trainBatchSize', default=100, type=int, help='training batch size')
     parser.add_argument('--testBatchSize', default=100, type=int, help='testing batch size')
-    parser.add_argument('--cuda', default=torch.cuda.is_available(), type=bool, help='whether cuda is in use')
+    parser.add_argument('--device', default='auto', choices=['auto', 'cuda', 'mps', 'cpu'],
+                        help="compute device; 'auto' picks cuda > mps > cpu")
+    parser.add_argument('--max-train-batches', default=0, type=int,
+                        help='cap training batches per epoch (0 = use all); handy for smoke tests')
+    parser.add_argument('--max-test-batches', default=0, type=int,
+                        help='cap test batches (0 = use all); handy for smoke tests')
     args = parser.parse_args()
 
     solver = Solver(args)
@@ -39,7 +44,9 @@ class Solver(object):
         self.optimizer = None
         self.scheduler = None
         self.device = None
-        self.cuda = config.cuda
+        self.device_arg = config.device
+        self.max_train_batches = config.max_train_batches
+        self.max_test_batches = config.max_test_batches
         self.train_loader = None
         self.test_loader = None
 
@@ -51,12 +58,22 @@ class Solver(object):
         test_set = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=test_transform)
         self.test_loader = torch.utils.data.DataLoader(dataset=test_set, batch_size=self.test_batch_size, shuffle=False)
 
+    def resolve_device(self):
+        choice = self.device_arg
+        if choice == 'auto':
+            if torch.cuda.is_available():
+                choice = 'cuda'
+            elif torch.backends.mps.is_available():
+                choice = 'mps'
+            else:
+                choice = 'cpu'
+        return torch.device(choice)
+
     def load_model(self):
-        if self.cuda:
-            self.device = torch.device('cuda')
+        self.device = self.resolve_device()
+        if self.device.type == 'cuda':
             cudnn.benchmark = True
-        else:
-            self.device = torch.device('cpu')
+        print("Using device:", self.device)
 
         self.model = LeNet_ACDA(10).to(self.device)
         # self.model = LeNet(10).to(self.device)
@@ -76,6 +93,8 @@ class Solver(object):
         total = 0
 
         for batch_num, (data, target) in enumerate(self.train_loader):
+            if self.max_train_batches and batch_num >= self.max_train_batches:
+                break
             data, target = data.to(self.device), target.to(self.device)
             self.optimizer.zero_grad()
             output = self.model(data)
@@ -103,6 +122,8 @@ class Solver(object):
 
         with torch.no_grad():
             for batch_num, (data, target) in enumerate(self.test_loader):
+                if self.max_test_batches and batch_num >= self.max_test_batches:
+                    break
                 data, target = data.to(self.device), target.to(self.device)
                 output = self.model(data)
                 loss = self.criterion(output, target)
@@ -126,11 +147,11 @@ class Solver(object):
         self.load_model()
         accuracy = 0
         for epoch in range(1, self.epochs + 1):
-            self.scheduler.step(epoch)
             print("\n===> epoch: %d/%d" % (epoch,self.epochs))
             train_result = self.train()
             print(train_result)
             test_result = self.test()
+            self.scheduler.step()
             accuracy = max(accuracy, test_result[1])
             if epoch == self.epochs:
                 print("===> BEST ACC. PERFORMANCE: %.3f%%" % (accuracy * 100))
